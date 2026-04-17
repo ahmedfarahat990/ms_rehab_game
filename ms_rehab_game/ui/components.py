@@ -5,7 +5,35 @@ from typing import Callable
 
 import pygame
 
+from ms_rehab_game.ui.icons import render_icon
 from ms_rehab_game.settings import BG_CARD, CYAN, DARK_GRAY, LIGHT_GRAY, TEXT_MUTED, WHITE, get_font
+
+
+def _truncate_text_to_width(font: pygame.font.Font, text: str, max_width: int, from_start: bool = False) -> str:
+    if max_width <= 0:
+        return ""
+    if font.size(text)[0] <= max_width:
+        return text
+
+    ellipsis = "..."
+    if font.size(ellipsis)[0] > max_width:
+        return ""
+
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if from_start:
+            candidate = f"{ellipsis}{text[-mid:]}" if mid else ellipsis
+        else:
+            candidate = f"{text[:mid].rstrip()}{ellipsis}" if mid else ellipsis
+        if font.size(candidate)[0] <= max_width:
+            low = mid
+        else:
+            high = mid - 1
+
+    if from_start:
+        return f"{ellipsis}{text[-low:]}" if low else ellipsis
+    return f"{text[:low].rstrip()}{ellipsis}" if low else ellipsis
 
 
 def draw_text(
@@ -16,12 +44,76 @@ def draw_text(
     pos: tuple[int, int],
     center: bool = False,
     bold: bool = False,
+    max_width: int | None = None,
+    truncate: bool = False,
+    truncate_from_start: bool = False,
+    clip_rect: pygame.Rect | None = None,
 ) -> pygame.Rect:
     font = get_font(size, bold=bold)
-    rendered = font.render(text, True, color)
+    display_text = text
+    if max_width is not None and truncate:
+        display_text = _truncate_text_to_width(font, text, max_width, from_start=truncate_from_start)
+
+    rendered = font.render(display_text, True, color)
     rect = rendered.get_rect(center=pos) if center else rendered.get_rect(topleft=pos)
-    surface.blit(rendered, rect)
+
+    target_clip = clip_rect
+    if target_clip is None and max_width is not None:
+        if center:
+            target_clip = pygame.Rect(pos[0] - max_width // 2, rect.y, max_width, rect.height)
+        else:
+            target_clip = pygame.Rect(rect.x, rect.y, max_width, rect.height)
+
+    if target_clip is not None:
+        previous_clip = surface.get_clip()
+        surface.set_clip(target_clip)
+        surface.blit(rendered, rect)
+        surface.set_clip(previous_clip)
+    else:
+        surface.blit(rendered, rect)
+
     return rect
+
+
+def draw_text_in_rect(
+    surface: pygame.Surface,
+    text: str,
+    size: int,
+    color: tuple[int, int, int],
+    rect: pygame.Rect,
+    *,
+    center: bool = True,
+    bold: bool = False,
+    padding: int = 8,
+    min_size: int = 12,
+    truncate: bool = True,
+    truncate_from_start: bool = False,
+) -> pygame.Rect:
+    inner = rect.inflate(-padding * 2, -padding * 2)
+    if inner.width <= 0 or inner.height <= 0:
+        return pygame.Rect(rect.x, rect.y, 0, 0)
+
+    fit_size = max(min_size, size)
+    while fit_size > min_size:
+        test_font = get_font(fit_size, bold=bold)
+        if test_font.get_height() <= inner.height:
+            break
+        fit_size -= 1
+
+    draw_pos = inner.center if center else (inner.x, inner.y + max(0, (inner.height - get_font(fit_size, bold=bold).get_height()) // 2))
+    return draw_text(
+        surface,
+        text,
+        fit_size,
+        color,
+        draw_pos,
+        center=center,
+        bold=bold,
+        max_width=inner.width,
+        truncate=truncate,
+        truncate_from_start=truncate_from_start,
+        clip_rect=inner,
+    )
 
 
 @dataclass
@@ -31,6 +123,7 @@ class Button:
     callback: Callable[[], None]
     enabled: bool = True
     accent: tuple[int, int, int] = CYAN
+    icon: str | None = None
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if self.enabled and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.rect.collidepoint(event.pos):
@@ -47,7 +140,45 @@ class Button:
             border = LIGHT_GRAY
         pygame.draw.rect(surface, fill, self.rect, border_radius=12)
         pygame.draw.rect(surface, border, self.rect, width=2, border_radius=12)
-        draw_text(surface, self.text, 24, WHITE if self.enabled else TEXT_MUTED, self.rect.center, center=True, bold=True)
+        text_color = WHITE if self.enabled else TEXT_MUTED
+        icon_surface = None
+        if self.icon:
+            icon_size = max(12, min(22, self.rect.height - 14))
+            icon_surface = render_icon(self.icon, icon_size, text_color)
+
+        if icon_surface is not None:
+            content_rect = self.rect.inflate(-14, -8)
+            icon_rect = icon_surface.get_rect()
+            icon_rect.x = content_rect.x + 4
+            icon_rect.centery = content_rect.centery
+            text_rect = pygame.Rect(icon_rect.right + 8, content_rect.y, max(10, content_rect.right - (icon_rect.right + 8)), content_rect.height)
+            surface.blit(icon_surface, icon_rect)
+            draw_text_in_rect(
+                surface,
+                self.text,
+                24,
+                text_color,
+                text_rect,
+                center=False,
+                bold=True,
+                padding=0,
+                min_size=13,
+                truncate=True,
+            )
+            return
+
+        draw_text_in_rect(
+            surface,
+            self.text,
+            24,
+            text_color,
+            self.rect,
+            center=True,
+            bold=True,
+            padding=10,
+            min_size=13,
+            truncate=True,
+        )
 
 
 @dataclass
@@ -74,7 +205,19 @@ class TextInput:
         pygame.draw.rect(surface, CYAN if self.active else DARK_GRAY, self.rect, width=2, border_radius=8)
         display = ("*" * len(self.text)) if self.password and self.text else self.text or self.placeholder
         color = WHITE if self.text else TEXT_MUTED
-        draw_text(surface, display, 24, color, (self.rect.x + 12, self.rect.y + 11))
+        draw_text_in_rect(
+            surface,
+            display,
+            24,
+            color,
+            self.rect,
+            center=False,
+            bold=False,
+            padding=12,
+            min_size=14,
+            truncate=True,
+            truncate_from_start=bool(self.text),
+        )
 
 
 @dataclass
@@ -153,7 +296,18 @@ class ToastManager:
             pygame.draw.rect(surface, (18, 23, 33), rect, border_radius=10)
             pygame.draw.rect(surface, toast["color"], rect, width=2, border_radius=10)
             pygame.draw.circle(surface, toast["color"], (rect.x + 24, rect.centery), 12)
-            draw_text(surface, toast["title"], 21, WHITE, (rect.x + 45, rect.y + 14), bold=True)
+            draw_text_in_rect(
+                surface,
+                toast["title"],
+                21,
+                WHITE,
+                pygame.Rect(rect.x + 45, rect.y + 8, rect.width - 55, rect.height - 12),
+                center=False,
+                bold=True,
+                padding=0,
+                min_size=14,
+                truncate=True,
+            )
 
 
 def draw_progress_bar(surface: pygame.Surface, rect: pygame.Rect, ratio: float, color: tuple[int, int, int]) -> None:

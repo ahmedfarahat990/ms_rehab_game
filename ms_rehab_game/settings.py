@@ -50,9 +50,9 @@ MINDFUL_TOWER_MODES = ["pinch_precision", "memory"]
 
 THUMB_SPEEDS = {1: 120, 2: 200, 3: 300}
 THUMB_DURATIONS = {
-    1: "Slower moving balls and generous timing.",
-    2: "Faster pace and stronger focus demands.",
-    3: "Rapid reactions with minimal recovery time.",
+    1: "Slower balls and wider reaction timing.",
+    2: "Faster pace with tighter response windows.",
+    3: "Fastest pace with minimal recovery time.",
 }
 TOWER_CONFIG = {
     1: {"count": 4, "cols": 2, "rows": 2, "block": 60, "snap": 50},
@@ -105,3 +105,14 @@ def medal_for_score(game_name: str, score: int) -> str:
         if score >= threshold:
             return medal
     return "Bronze"
+
+
+def format_mode_label(mode: str) -> str:
+    labels = {
+        "calm": "Calm",
+        "shuffle": "Shuffle Lanes",
+        "color_reveal": "Color Reveal",
+        "memory": "Memory",
+        "pinch_precision": "Pinch Precision",
+    }
+    return labels.get(mode, mode.replace("_", " ").title())

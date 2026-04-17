@@ -8,8 +8,8 @@ import pandas as pd
 import pygame
 
 from ms_rehab_game.screens.base import BaseScreen
-from ms_rehab_game.settings import BG_CARD, BG_MENU, CYAN, TEXT_MUTED, WHITE
-from ms_rehab_game.ui.components import Button, draw_text
+from ms_rehab_game.settings import BG_CARD, BG_MENU, CYAN, TEXT_MUTED, WHITE, format_mode_label
+from ms_rehab_game.ui.components import Button, draw_text, draw_text_in_rect
 
 
 class StatisticsScreen(BaseScreen):
@@ -19,8 +19,8 @@ class StatisticsScreen(BaseScreen):
         self.hand_filter = "Both"
         self.level_filter = "All"
         self.mode_filter = "All"
-        self.back_button = Button(pygame.Rect(70, 640, 220, 50), "BACK", lambda: self.manager.go_to("game_menu"))
-        self.export_button = Button(pygame.Rect(980, 640, 220, 50), "DOWNLOAD EXCEL", self._export)
+        self.back_button = Button(pygame.Rect(70, 640, 220, 50), "BACK", lambda: self.manager.go_to("game_menu"), icon="back")
+        self.export_button = Button(pygame.Rect(980, 640, 220, 50), "EXPORT EXCEL", self._export, icon="export")
         self.chart_surfaces: list[pygame.Surface] = []
         self.filter_buttons: list[Button] = []
 
@@ -29,11 +29,12 @@ class StatisticsScreen(BaseScreen):
         self._build_charts()
 
     def _build_filter_buttons(self) -> None:
+        mode_label = "All" if self.mode_filter == "All" else format_mode_label(self.mode_filter)
         self.filter_buttons = [
-            Button(pygame.Rect(60, 200, 170, 34), f"Time: {self.time_filter}", self._cycle_time),
+            Button(pygame.Rect(60, 200, 170, 34), f"Range: {self.time_filter}", self._cycle_time),
             Button(pygame.Rect(250, 200, 170, 34), f"Hand: {self.hand_filter}", self._cycle_hand),
             Button(pygame.Rect(440, 200, 170, 34), f"Level: {self.level_filter}", self._cycle_level),
-            Button(pygame.Rect(630, 200, 250, 34), f"Mode: {self.mode_filter}", self._cycle_mode),
+            Button(pygame.Rect(630, 200, 250, 34), f"Mode: {mode_label}", self._cycle_mode),
         ]
 
     def _cycle_time(self) -> None:
@@ -68,7 +69,7 @@ class StatisticsScreen(BaseScreen):
         username = self.manager.current_user["username"]
         export_path = Path("exports") / f"{username}_sessions.xlsx"
         path = self.manager.database.export_sessions_to_excel(self.manager.current_user["id"], export_path)
-        self.manager.push_toast(f"Exported to {path}")
+        self.manager.push_toast(f"Excel saved: {path}")
 
     def _figure_to_surface(self, fig) -> pygame.Surface:
         buffer = io.BytesIO()
@@ -84,7 +85,7 @@ class StatisticsScreen(BaseScreen):
         if df.empty:
             dummy = pygame.Surface((340, 220))
             dummy.fill(BG_CARD)
-            draw_text(dummy, "No sessions yet", 28, WHITE, (170, 110), center=True)
+            draw_text(dummy, "No session data yet", 28, WHITE, (170, 110), center=True)
             self.chart_surfaces = [dummy, dummy.copy(), dummy.copy()]
             return
         df["date"] = pd.to_datetime(df["played_at"]).dt.date
@@ -144,19 +145,19 @@ class StatisticsScreen(BaseScreen):
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BG_MENU)
-        draw_text(surface, "Statistics", 42, WHITE, (surface.get_width() // 2, 55), center=True, bold=True)
+        draw_text(surface, "Performance Summary", 42, WHITE, (surface.get_width() // 2, 55), center=True, bold=True)
         summary = self.manager.database.get_statistics_summary(self.manager.current_user["id"], self.manager.selected_game)
         labels = [
-            f"Total games played: {summary['games_played']}",
-            f"Average accuracy: {summary['avg_accuracy']:.1f}%",
-            f"Best score: {summary['best_score']}",
-            f"Days active: {summary['days_active']}",
+            f"Sessions Played: {summary['games_played']}",
+            f"Average Accuracy: {summary['avg_accuracy']:.1f}%",
+            f"Best Score: {summary['best_score']}",
+            f"Active Days: {summary['days_active']}",
         ]
         for idx, label in enumerate(labels):
             rect = pygame.Rect(60 + idx * 300, 100, 260, 90)
             pygame.draw.rect(surface, BG_CARD, rect, border_radius=12)
             pygame.draw.rect(surface, CYAN, rect, width=2, border_radius=12)
-            draw_text(surface, label, 22, WHITE, (rect.centerx, rect.centery), center=True, bold=True)
+            draw_text_in_rect(surface, label, 22, WHITE, rect, center=True, bold=True, padding=12, min_size=13, truncate=True)
         for button in self.filter_buttons:
             button.draw(surface)
         positions = [(70, 240), (470, 240), (870, 240)]

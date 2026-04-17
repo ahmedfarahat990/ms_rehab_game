@@ -139,7 +139,7 @@ class ThumbTangoGame(RehabGameBase):
             self.draw_finish_modal(surface)
 
     def draw_board(self, surface: pygame.Surface) -> None:
-        draw_text(surface, "Perform the matching thumb opposition in the split zone.", 22, TEXT_MUTED, (300, 120))
+        draw_text(surface, "When the ball reaches the split zone, use one thumb-to-finger touch to choose the matching lane.", 22, TEXT_MUTED, (300, 120))
         pygame.draw.line(surface, GRAY, (640, 150), (640, 330), 8)
         split_y = 330
         lane_centers = [350, 520, 760, 930]
@@ -160,5 +160,5 @@ class ThumbTangoGame(RehabGameBase):
             pygame.draw.circle(surface, color, (int(ball["x"]), int(ball["y"])), 22)
             pygame.draw.circle(surface, WHITE, (int(ball["x"]), int(ball["y"])), 22, 2)
         if mode == "memory" and self.preview_timer > 0:
-            draw_text(surface, f"Memorize the lanes: {self.preview_timer:.1f}s", 24, CYAN, (440, 150))
+            draw_text(surface, f"Memorize lane colors: {self.preview_timer:.1f}s", 24, CYAN, (440, 150))
 

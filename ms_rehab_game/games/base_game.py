@@ -6,7 +6,7 @@ from typing import Any
 import pygame
 
 from ms_rehab_game.screens.base import BaseScreen
-from ms_rehab_game.settings import BG_CARD, BG_GAME, CYAN, DARK_GRAY, GAME_COLORS, LIGHT_GRAY, RED, TEXT_MUTED, WEBCAM_PREVIEW_SIZE, WHITE, medal_for_score
+from ms_rehab_game.settings import BG_CARD, BG_GAME, CYAN, DARK_GRAY, GAME_COLORS, LIGHT_GRAY, RED, TEXT_MUTED, WEBCAM_PREVIEW_SIZE, WHITE, format_mode_label, medal_for_score
 from ms_rehab_game.ui.animations import Fireworks, ParticleSystem
 from ms_rehab_game.ui.components import Button, draw_progress_bar, draw_text
 
@@ -72,13 +72,13 @@ class RehabGameBase(BaseScreen):
         self.particles = ParticleSystem()
         self.fireworks = Fireworks(self.particles)
         self.finish_buttons = [
-            Button(pygame.Rect(415, 490, 180, 50), "NEXT LEVEL", self._next_level),
-            Button(pygame.Rect(610, 490, 180, 50), "REPLAY", self._replay),
-            Button(pygame.Rect(805, 490, 180, 50), "MENU", lambda: self.manager.go_to("game_menu")),
+            Button(pygame.Rect(415, 490, 180, 50), "NEXT LEVEL", self._next_level, icon="next"),
+            Button(pygame.Rect(610, 490, 180, 50), "REPLAY", self._replay, icon="replay"),
+            Button(pygame.Rect(805, 490, 180, 50), "MENU", lambda: self.manager.go_to("game_menu"), icon="menu"),
         ]
         self.pause_buttons = [
-            Button(pygame.Rect(510, 385, 260, 50), "RESUME", self.resume_game),
-            Button(pygame.Rect(510, 455, 260, 50), "EXIT TO MENU", self.exit_to_menu),
+            Button(pygame.Rect(510, 385, 260, 50), "RESUME", self.resume_game, icon="resume"),
+            Button(pygame.Rect(510, 455, 260, 50), "EXIT TO MENU", self.exit_to_menu, icon="back"),
         ]
         self.reset_game_state()
 
@@ -99,6 +99,10 @@ class RehabGameBase(BaseScreen):
             elif self.is_paused:
                 for button in self.pause_buttons:
                     button.handle_event(event)
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                # Allow direct mouse pause click for all games, even when hand cursor is not active.
+                if self.pause_btn_rect.collidepoint(event.pos) and self.can_pause():
+                    self.pause_game()
         if self._swipe_pause_enabled:
             if (
                 not self.game_over
@@ -265,13 +269,13 @@ class RehabGameBase(BaseScreen):
         self.pause_ready_timer = 0.0
         self.pause_cooldown = 0.75
         self.finish_buttons = [
-            Button(pygame.Rect(415, 490, 180, 50), "NEXT LEVEL", self._next_level),
-            Button(pygame.Rect(610, 490, 180, 50), "REPLAY", self._replay),
-            Button(pygame.Rect(805, 490, 180, 50), "MENU", lambda: self.manager.go_to("game_menu")),
+            Button(pygame.Rect(415, 490, 180, 50), "NEXT LEVEL", self._next_level, icon="next"),
+            Button(pygame.Rect(610, 490, 180, 50), "REPLAY", self._replay, icon="replay"),
+            Button(pygame.Rect(805, 490, 180, 50), "MENU", lambda: self.manager.go_to("game_menu"), icon="menu"),
         ]
         self.pause_buttons = [
-            Button(pygame.Rect(510, 385, 260, 50), "RESUME", self.resume_game),
-            Button(pygame.Rect(510, 455, 260, 50), "EXIT TO MENU", self.exit_to_menu),
+            Button(pygame.Rect(510, 385, 260, 50), "RESUME", self.resume_game, icon="resume"),
+            Button(pygame.Rect(510, 455, 260, 50), "EXIT TO MENU", self.exit_to_menu, icon="back"),
         ]
         self.restore_state(paused["state_json"])
 
@@ -280,7 +284,7 @@ class RehabGameBase(BaseScreen):
         # Left column: game name, level, mode
         draw_text(surface, self.game_name.replace("_", " ").title(), 28, WHITE, (30, 22), bold=True)
         draw_text(surface, f"Level {self.level}", 22, TEXT_MUTED, (30, 60))
-        draw_text(surface, f"Mode: {self.settings.get('cognitive_mode', '')}", 20, TEXT_MUTED, (30, 90))
+        draw_text(surface, f"Mode: {format_mode_label(self.settings.get('cognitive_mode', ''))}", 20, TEXT_MUTED, (30, 90))
         # Centre column: score & accuracy — positioned to stay left of the timer bar
         draw_text(surface, f"Score: {self.score}", 26, WHITE, (640, 24), center=True, bold=True)
         acc = (self.correct_actions / self.total_actions * 100) if self.total_actions else 0
@@ -295,8 +299,10 @@ class RehabGameBase(BaseScreen):
             if self.score > 0 or self.total_actions > 0:
                 pause_hint = "Swipe right to pause"
             else:
-                pause_hint = "Complete one action to unlock pause"
-            draw_text(surface, pause_hint, 16, TEXT_MUTED, (sw - 350, 54))
+                pause_hint = "Pause unlocks after your first action"
+            pause_hint_x = sw - 350
+            pause_hint_max = max(120, (sw - 14 - 130) - pause_hint_x - 8)
+            draw_text(surface, pause_hint, 16, TEXT_MUTED, (pause_hint_x, 54), max_width=pause_hint_max, truncate=True)
         # ── Hand-clickable PAUSE button ──────────────────────────────────────
         btn_w, btn_h = 130, 36
         self.pause_btn_rect = pygame.Rect(sw - btn_w - 14, 68, btn_w, btn_h)
@@ -306,16 +312,26 @@ class RehabGameBase(BaseScreen):
         if self.can_pause():
             btn_bg   = CYAN if hovered else BG_CARD
             btn_border = (min(255, CYAN[0] + 50), min(255, CYAN[1] + 50), min(255, CYAN[2] + 50)) if hovered else CYAN
-            btn_label  = "\u23f8  PAUSE"
+            btn_label  = "PAUSE"
             lbl_color  = WHITE
         else:
             btn_bg     = (30, 40, 52)
             btn_border = DARK_GRAY
-            btn_label  = "\u23f8  PAUSE"
+            btn_label  = "PAUSE"
             lbl_color  = TEXT_MUTED
         pygame.draw.rect(surface, btn_bg, self.pause_btn_rect, border_radius=8)
         pygame.draw.rect(surface, btn_border, self.pause_btn_rect, width=2, border_radius=8)
-        draw_text(surface, btn_label, 15, lbl_color, self.pause_btn_rect.center, center=True, bold=True)
+        draw_text(
+            surface,
+            btn_label,
+            15,
+            lbl_color,
+            self.pause_btn_rect.center,
+            center=True,
+            bold=True,
+            max_width=self.pause_btn_rect.width - 14,
+            truncate=True,
+        )
         if gesture_data.frame_surface:
             x = surface.get_width() - WEBCAM_PREVIEW_SIZE[0] - 18
             y = surface.get_height() - WEBCAM_PREVIEW_SIZE[1] - 18
@@ -324,19 +340,39 @@ class RehabGameBase(BaseScreen):
             pygame.draw.rect(surface, LIGHT_GRAY, preview_bg, width=2, border_radius=8)
             surface.blit(gesture_data.frame_surface, (x, y))
 
+    def _layout_pause_buttons(self, panel: pygame.Rect) -> None:
+        if len(self.pause_buttons) < 2:
+            return
+        button_width = min(300, panel.width - 120)
+        button_x = panel.centerx - button_width // 2
+        first_y = panel.y + 205
+        gap = 64
+        self.pause_buttons[0].rect = pygame.Rect(button_x, first_y, button_width, 50)
+        self.pause_buttons[1].rect = pygame.Rect(button_x, first_y + gap, button_width, 50)
+
     def draw_pause_overlay(self, surface: pygame.Surface) -> None:
         overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 170))
         surface.blit(overlay, (0, 0))
         panel = pygame.Rect(surface.get_width() // 2 - 230, 220, 460, 340)
+        self._layout_pause_buttons(panel)
         pygame.draw.rect(surface, BG_CARD, panel, border_radius=12)
         pygame.draw.rect(surface, WHITE, panel, width=2, border_radius=12)
-        draw_text(surface, "Game Paused", 36, WHITE, (panel.centerx, panel.y + 38), center=True, bold=True)
-        draw_text(surface, f"Score: {self.score}", 24, WHITE, (panel.centerx, panel.y + 95), center=True)
-        draw_text(surface, f"Time Remaining: {int(self.time_remaining)}s", 20, TEXT_MUTED, (panel.centerx, panel.y + 130), center=True)
-        draw_text(surface, f"Level {self.level}", 20, TEXT_MUTED, (panel.centerx, panel.y + 158), center=True)
+        draw_text(surface, "Game Paused", 36, WHITE, (panel.centerx, panel.y + 38), center=True, bold=True, max_width=panel.width - 36, truncate=True)
+        draw_text(surface, f"Score: {self.score}", 24, WHITE, (panel.centerx, panel.y + 95), center=True, max_width=panel.width - 36, truncate=True)
+        draw_text(
+            surface,
+            f"Time Remaining: {int(self.time_remaining)}s",
+            20,
+            TEXT_MUTED,
+            (panel.centerx, panel.y + 130),
+            center=True,
+            max_width=panel.width - 36,
+            truncate=True,
+        )
+        draw_text(surface, f"Level {self.level}", 20, TEXT_MUTED, (panel.centerx, panel.y + 158), center=True, max_width=panel.width - 36, truncate=True)
         if self._swipe_pause_enabled:
-            draw_text(surface, "Swipe left to resume", 17, CYAN, (panel.centerx, panel.y + 188), center=True)
+            draw_text(surface, "Swipe left to resume", 17, CYAN, (panel.centerx, panel.y + 178), center=True, max_width=panel.width - 36, truncate=True)
         for button in self.pause_buttons:
             button.draw(surface, hand_pos=self.hand_cursor_pos)
 
@@ -349,15 +385,34 @@ class RehabGameBase(BaseScreen):
         pygame.draw.rect(surface, CYAN, panel, width=2, border_radius=12)
         # Use a smaller font for the title so it always fits inside the 680px panel
         if self.new_high_score:
-            title = "NEW HIGH SCORE!  🏆"
+            title = "NEW HIGH SCORE!"
         else:
-            title = "Good effort! Keep training!"
-        draw_text(surface, title, 28, CYAN if self.new_high_score else WHITE, (panel.centerx, panel.y + 45), center=True, bold=True)
+            title = "Great effort. Keep training."
+        draw_text(
+            surface,
+            title,
+            28,
+            CYAN if self.new_high_score else WHITE,
+            (panel.centerx, panel.y + 45),
+            center=True,
+            bold=True,
+            max_width=panel.width - 40,
+            truncate=True,
+        )
         draw_text(surface, f"Score: {self.score}", 46, WHITE, (panel.centerx, panel.y + 110), center=True, bold=True)
-        draw_text(surface, f"Medal: {medal_for_score(self.game_name, self.score)}", 26, TEXT_MUTED, (panel.centerx, panel.y + 172), center=True)
+        draw_text(
+            surface,
+            f"Medal: {medal_for_score(self.game_name, self.score)}",
+            26,
+            TEXT_MUTED,
+            (panel.centerx, panel.y + 172),
+            center=True,
+            max_width=panel.width - 40,
+            truncate=True,
+        )
         if self.unlocked_achievements:
             # Wrap long achievement lists to prevent overflow
             ach_text = ", ".join(a.replace("_", " ").title() for a in self.unlocked_achievements)
-            draw_text(surface, ach_text, 17, TEXT_MUTED, (panel.centerx, panel.y + 210), center=True)
+            draw_text(surface, ach_text, 17, TEXT_MUTED, (panel.centerx, panel.y + 210), center=True, max_width=panel.width - 40, truncate=True)
         for button in self.finish_buttons:
             button.draw(surface, hand_pos=self.hand_cursor_pos)

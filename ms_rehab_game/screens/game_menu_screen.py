@@ -18,16 +18,17 @@ class GameMenuScreen(BaseScreen):
         user_id = self.manager.current_user["id"]
         paused = self.manager.database.get_paused_session(user_id, game_name)
         self.buttons = [
-            Button(pygame.Rect(530, 220, 220, 50), "NEW GAME", lambda: self.manager.go_to("level_select")),
+            Button(pygame.Rect(530, 220, 220, 50), "NEW GAME", lambda: self.manager.go_to("level_select"), icon="new"),
             Button(
                 pygame.Rect(530, 290, 220, 50),
                 "RESUME",
                 lambda: self.manager.go_to(game_name, resume=True),
                 enabled=paused is not None,
+                icon="resume",
             ),
-            Button(pygame.Rect(530, 360, 220, 50), "STATISTICS", lambda: self.manager.go_to("statistics")),
-            Button(pygame.Rect(530, 430, 220, 50), "SETTINGS", lambda: self.manager.go_to("settings")),
-            Button(pygame.Rect(530, 500, 220, 50), "BACK", lambda: self.manager.go_to("start")),
+            Button(pygame.Rect(530, 360, 220, 50), "STATISTICS", lambda: self.manager.go_to("statistics"), icon="stats"),
+            Button(pygame.Rect(530, 430, 220, 50), "SETTINGS", lambda: self.manager.go_to("settings"), icon="settings"),
+            Button(pygame.Rect(530, 500, 220, 50), "BACK", lambda: self.manager.go_to("start"), icon="back"),
         ]
 
     def handle_event(self, events, gesture_data) -> None:
@@ -39,6 +40,6 @@ class GameMenuScreen(BaseScreen):
         surface.fill(BG_MENU)
         title = "Thumb Tango" if self.manager.selected_game == "thumb_tango" else "Mindful Tower"
         draw_text(surface, title, 42, WHITE, (surface.get_width() // 2, 110), center=True, bold=True)
-        draw_text(surface, "Pick up where you left off or start a new training session.", 20, TEXT_MUTED, (surface.get_width() // 2, 160), center=True)
+        draw_text(surface, "Start a new session or continue your latest progress.", 20, TEXT_MUTED, (surface.get_width() // 2, 160), center=True)
         for button in self.buttons:
             button.draw(surface)

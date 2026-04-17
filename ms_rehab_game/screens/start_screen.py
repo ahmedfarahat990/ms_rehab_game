@@ -4,16 +4,16 @@ import pygame
 
 from ms_rehab_game.screens.base import BaseScreen
 from ms_rehab_game.settings import BG_CARD, BG_MENU, CYAN, TEXT_MUTED, WHITE
-from ms_rehab_game.ui.components import Button, draw_text
+from ms_rehab_game.ui.components import Button, draw_text, draw_text_in_rect
 
 
 class StartScreen(BaseScreen):
     def __init__(self, manager) -> None:
         super().__init__(manager)
-        self.logout_button = Button(pygame.Rect(1040, 30, 180, 50), "LOGOUT", self.manager.logout)
+        self.logout_button = Button(pygame.Rect(1040, 30, 180, 50), "LOG OUT", self.manager.logout, icon="logout")
         self.play_buttons = {
-            "thumb_tango": Button(pygame.Rect(225, 500, 220, 50), "PLAY", lambda: self._open_game("thumb_tango")),
-            "mindful_tower": Button(pygame.Rect(835, 500, 220, 50), "PLAY", lambda: self._open_game("mindful_tower")),
+            "thumb_tango": Button(pygame.Rect(225, 500, 220, 50), "START", lambda: self._open_game("thumb_tango"), icon="play"),
+            "mindful_tower": Button(pygame.Rect(835, 500, 220, 50), "START", lambda: self._open_game("mindful_tower"), icon="play"),
         }
 
     def _open_game(self, game_name: str) -> None:
@@ -30,9 +30,30 @@ class StartScreen(BaseScreen):
         pygame.draw.rect(surface, BG_CARD, rect, border_radius=12)
         pygame.draw.rect(surface, CYAN, rect, width=2, border_radius=12)
         draw_text(surface, icon, 64, WHITE, (rect.centerx, rect.y + 70), center=True)
-        draw_text(surface, title, 28, WHITE, (rect.centerx, rect.y + 155), center=True, bold=True)
+        draw_text_in_rect(
+            surface,
+            title,
+            28,
+            WHITE,
+            pygame.Rect(rect.x + 20, rect.y + 132, rect.width - 40, 40),
+            center=True,
+            bold=True,
+            padding=0,
+            min_size=16,
+            truncate=True,
+        )
         for index, line in enumerate(lines):
-            draw_text(surface, line, 20, TEXT_MUTED, (rect.centerx, rect.y + 215 + index * 28), center=True)
+            draw_text_in_rect(
+                surface,
+                line,
+                20,
+                TEXT_MUTED,
+                pygame.Rect(rect.x + 20, rect.y + 200 + index * 30, rect.width - 40, 28),
+                center=True,
+                padding=0,
+                min_size=14,
+                truncate=True,
+            )
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BG_MENU)
@@ -44,16 +65,16 @@ class StartScreen(BaseScreen):
         self._draw_card(
             surface,
             left_card,
-            "Thumb Tango: Opposition Challenge",
-            ["Train finger opposition timing", "and flexible color-matching control."],
-            "✋",
+            "Thumb Tango",
+            ["Match each falling ball to the correct lane", "using thumb-to-finger opposition gestures."],
+            "TT",
         )
         self._draw_card(
             surface,
             right_card,
-            "Mindful Tower: Pinch Perfect",
-            ["Build tower patterns with steady pinch", "precision and working memory."],
-            "▥",
+            "Mindful Tower",
+            ["Pick up blocks with a pinch and place them", "on matching target markers."],
+            "MT",
         )
         self.play_buttons["thumb_tango"].draw(surface)
         self.play_buttons["mindful_tower"].draw(surface)

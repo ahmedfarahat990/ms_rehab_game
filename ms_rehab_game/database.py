@@ -90,9 +90,9 @@ class DatabaseManager:
                 user_id = cursor.lastrowid
             for game_name in ("thumb_tango", "mindful_tower"):
                 self.save_user_game_settings(user_id, game_name, DEFAULT_USER_GAME_SETTINGS.copy())
-            return True, "User registered successfully."
+            return True, "Account created successfully."
         except sqlite3.IntegrityError:
-            return False, "Username already exists."
+            return False, "That username is already in use."
 
     def authenticate_user(self, username: str, password: str) -> dict[str, Any] | None:
         with self.connect() as conn:

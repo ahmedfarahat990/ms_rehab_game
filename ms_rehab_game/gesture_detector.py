@@ -63,6 +63,39 @@ def detect_non_controlling_hand_press(landmarks_px: list[tuple[int, int]], frame
     return 0 <= palm_x <= width and 0 <= palm_y <= height
 
 
+def _is_open_palm(hand_data: dict[str, Any]) -> bool:
+    landmarks = hand_data.get("landmarks_px", [])
+    if len(landmarks) < 21:
+        return False
+    if hand_data.get("pinch", {}).get("pinching"):
+        return False
+
+    wrist = landmarks[0]
+    # (tip_idx, pip_idx, extension_ratio)
+    finger_checks = [
+        (4, 3, 1.12),   # thumb
+        (8, 6, 1.20),   # index
+        (12, 10, 1.20), # middle
+        (16, 14, 1.18), # ring
+        (20, 18, 1.15), # little
+    ]
+
+    for tip_idx, pip_idx, ratio in finger_checks:
+        tip_distance = _distance(landmarks[tip_idx], wrist)
+        pip_distance = _distance(landmarks[pip_idx], wrist)
+        if tip_distance <= pip_distance * ratio:
+            return False
+    return True
+
+
+def detect_both_hands_pause(hands_data: list[dict[str, Any]]) -> bool:
+    # Treat "both hands fully open" as the deliberate pause gesture.
+    visible_hands = [hand for hand in hands_data if len(hand.get("landmarks_px", [])) >= 21]
+    if len(visible_hands) < 2:
+        return False
+    return _is_open_palm(visible_hands[0]) and _is_open_palm(visible_hands[1])
+
+
 def ensure_hand_model() -> Path:
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     if not MODEL_PATH.exists():
@@ -75,6 +108,7 @@ class GestureSnapshot:
     hands: list[dict[str, Any]] = field(default_factory=list)
     controlling_hand: dict[str, Any] | None = None
     secondary_hand_hint: bool = False
+    both_hands_pause_gesture: bool = False
     swipe: str | None = None
     frame_surface: pygame.Surface | None = None
     timestamp: float = field(default_factory=time.time)
@@ -240,6 +274,7 @@ class MediaPipeGestureThread:
             hands_data: list[dict[str, Any]] = []
             controlling_hand = None
             secondary_hint = False
+            both_hands_pause_gesture = False
             swipe = None
             status = self.backend_name if self.backend is not None else self.latest.status
 
@@ -250,6 +285,7 @@ class MediaPipeGestureThread:
                         controlling_hand = hands_data[0]
                         self.wrist_history.append(controlling_hand["landmarks_px"][0])
                         swipe = self._detect_swipe()
+                        both_hands_pause_gesture = detect_both_hands_pause(hands_data)
                     if len(hands_data) > 1:
                         secondary_hint = detect_non_controlling_hand_press(
                             hands_data[1]["landmarks_px"],
@@ -262,6 +298,7 @@ class MediaPipeGestureThread:
                 hands=hands_data,
                 controlling_hand=controlling_hand,
                 secondary_hand_hint=secondary_hint,
+                both_hands_pause_gesture=both_hands_pause_gesture,
                 swipe=swipe,
                 frame_surface=self._make_surface(frame),
                 status=status,

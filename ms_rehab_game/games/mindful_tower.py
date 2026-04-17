@@ -23,8 +23,10 @@ class MindfulTowerGame(RehabGameBase):
         self.placed: dict[int, int] = {}
         self.dragging_block: dict | None = None
         self.was_pinching = False
+        self.pause_gesture_hold_timer = 0.0
+        self.pause_gesture_hold_seconds = 0.4
         # hand_cursor_pos / hand_cursor_pinching live in RehabGameBase
-        # Disable swipe-to-pause; only the hand-clickable ⏸ PAUSE button is used
+        # Disable swipe-to-pause; only the hand-clickable pause button is used
         self._swipe_pause_enabled = False
 
     def reset_game_state(self) -> None:
@@ -34,6 +36,7 @@ class MindfulTowerGame(RehabGameBase):
         self.placed = {}
         self.dragging_block = None
         self.was_pinching = False
+        self.pause_gesture_hold_timer = 0.0
         self.markers = self._build_markers(config)
         for idx, color_index in enumerate(self.target_pattern):
             self.source_blocks.append(
@@ -90,6 +93,7 @@ class MindfulTowerGame(RehabGameBase):
         self.total_actions = state.get("total_actions", 0)
         self.best_streak = state.get("best_streak", 0)
         self.streak = state.get("streak", 0)
+        self.pause_gesture_hold_timer = 0.0
 
     def update(self, dt, gesture_data) -> None:
         super().update(dt, gesture_data)
@@ -102,7 +106,16 @@ class MindfulTowerGame(RehabGameBase):
             self.hand_cursor_pos = None
             self.hand_cursor_pinching = False
         if self.game_over or self.is_paused:
+            self.pause_gesture_hold_timer = 0.0
             return
+        if self.can_pause() and gesture_data.both_hands_pause_gesture:
+            self.pause_gesture_hold_timer += dt
+            if self.pause_gesture_hold_timer >= self.pause_gesture_hold_seconds:
+                self.pause_gesture_hold_timer = 0.0
+                self.pause_game()
+                return
+        else:
+            self.pause_gesture_hold_timer = 0.0
         if self.preview_timer > 0:
             self.preview_timer = max(0.0, self.preview_timer - dt)
         if self.settings["cognitive_mode"] == "memory" and gesture_data.secondary_hand_hint:
@@ -173,22 +186,22 @@ class MindfulTowerGame(RehabGameBase):
 
     def draw_playfield(self, surface: pygame.Surface) -> None:
         config = TOWER_CONFIG[self.level]
-        draw_text(surface, f"Blocks: {len(self.placed)}/{len(self.markers)}", 26, WHITE, (30, 130), bold=True)
+        draw_text(surface, f"Blocks Placed: {len(self.placed)}/{len(self.markers)}", 26, WHITE, (30, 130), bold=True)
         source_area = pygame.Rect(40, 180, 360, 380)
         tower_area = pygame.Rect(480, 160, 420, 420)
         pygame.draw.rect(surface, BG_CARD, source_area, border_radius=12)
         pygame.draw.rect(surface, CYAN, source_area, width=2, border_radius=12)
         pygame.draw.rect(surface, BG_CARD, tower_area, border_radius=12)
         pygame.draw.rect(surface, CYAN, tower_area, width=2, border_radius=12)
-        draw_text(surface, "Source Blocks", 24, WHITE, (source_area.centerx, source_area.y + 18), center=True, bold=True)
-        draw_text(surface, "Build Tower", 24, WHITE, (tower_area.centerx, tower_area.y + 18), center=True, bold=True)
+        draw_text(surface, "Block Tray", 24, WHITE, (source_area.centerx, source_area.y + 18), center=True, bold=True)
+        draw_text(surface, "Build Area", 24, WHITE, (tower_area.centerx, tower_area.y + 18), center=True, bold=True)
         for marker in self.markers:
             pygame.draw.rect(surface, (90, 90, 90), marker["rect"], width=2, border_radius=6)
         show_target = self.settings["cognitive_mode"] == "pinch_precision" or self.preview_timer > 0 or self.hint_timer > 0
         preview_rect = pygame.Rect(920, 70, 200, 120)
         pygame.draw.rect(surface, BG_CARD, preview_rect, border_radius=10)
         pygame.draw.rect(surface, CYAN, preview_rect, width=2, border_radius=10)
-        draw_text(surface, "Target", 20, WHITE, (preview_rect.centerx, preview_rect.y + 10), center=True, bold=True)
+        draw_text(surface, "Target Pattern", 20, WHITE, (preview_rect.centerx, preview_rect.y + 10), center=True, bold=True)
         if show_target:
             scale = max(16, min(32, 90 // max(1, config["rows"])))
             for idx, color_index in enumerate(self.target_pattern):
@@ -197,7 +210,7 @@ class MindfulTowerGame(RehabGameBase):
                 rect = pygame.Rect(preview_rect.x + 20 + col * (scale + 6), preview_rect.bottom - 20 - (row + 1) * (scale + 6), scale, scale)
                 pygame.draw.rect(surface, GAME_COLORS[color_index], rect, border_radius=4)
         elif self.settings["cognitive_mode"] == "memory":
-            draw_text(surface, "Memory mode", 18, WHITE, (preview_rect.centerx, preview_rect.centery), center=True)
+            draw_text(surface, "Preview hidden in Memory mode", 18, WHITE, (preview_rect.centerx, preview_rect.centery), center=True)
         for block in self.source_blocks:
             color = GAME_COLORS[block["color_index"]]
             rect = block["rect"]
