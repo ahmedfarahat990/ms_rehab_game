@@ -203,7 +203,7 @@ class TutorialScreen(BaseScreen):
             pygame.draw.circle(surface, CYAN, (bx, by), 12)
             pygame.draw.circle(surface, WHITE, (bx, by), 12, 2)
 
-            hand_center = (rect.centerx, rect.bottom - 70)
+            hand_center = (rect.centerx, rect.bottom - 100)
             palm = pygame.Rect(hand_center[0] - 42, hand_center[1] - 6, 84, 46)
             pygame.draw.ellipse(surface, WHITE, palm, 2)
             finger_tips = [

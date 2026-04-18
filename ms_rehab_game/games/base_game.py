@@ -6,7 +6,7 @@ from typing import Any
 import pygame
 
 from ms_rehab_game.screens.base import BaseScreen
-from ms_rehab_game.settings import BG_CARD, BG_GAME, CYAN, DARK_GRAY, GAME_COLORS, LIGHT_GRAY, RED, TEXT_MUTED, WEBCAM_PREVIEW_SIZE, WHITE, format_mode_label, medal_for_score
+from ms_rehab_game.settings import BG_CARD, BG_GAME, CYAN, DARK_GRAY, GAME_COLORS, LIGHT_GRAY, ORANGE, RED, TEXT_MUTED, WEBCAM_PREVIEW_SIZE, WHITE, format_mode_label, medal_for_score
 from ms_rehab_game.ui.animations import Fireworks, ParticleSystem
 from ms_rehab_game.ui.components import Button, draw_progress_bar, draw_text
 
@@ -40,8 +40,13 @@ class RehabGameBase(BaseScreen):
         self.hand_cursor_pinching: bool = False
         self._hand_prev_pinching: bool = False
         self.pause_btn_rect: pygame.Rect = pygame.Rect(0, 0, 0, 0)
-        # Subclasses can set this to False to disable swipe-to-pause (e.g. MindfulTower)
-        self._swipe_pause_enabled: bool = True
+        self.hud_exit_btn_rect: pygame.Rect = pygame.Rect(0, 0, 0, 0)
+        self.hud_reset_btn_rect: pygame.Rect = pygame.Rect(0, 0, 0, 0)
+        # Confirm-dialog state (None | "exit" | "reset")
+        self.confirm_action: str | None = None
+        self._confirming: bool = False
+        self.confirm_yes_rect: pygame.Rect = pygame.Rect(0, 0, 0, 0)
+        self.confirm_no_rect: pygame.Rect = pygame.Rect(0, 0, 0, 0)
 
     def on_enter(self, resume: bool = False, from_pause: bool = False, **kwargs) -> None:
         if from_pause:
@@ -69,6 +74,8 @@ class RehabGameBase(BaseScreen):
         self.unlocked_achievements = []
         self.pause_ready_timer = 2.0
         self.pause_cooldown = 0.0
+        self.confirm_action = None
+        self._confirming = False
         self.particles = ParticleSystem()
         self.fireworks = Fireworks(self.particles)
         self.finish_buttons = [
@@ -93,26 +100,36 @@ class RehabGameBase(BaseScreen):
 
     def handle_event(self, events, gesture_data) -> None:
         for event in events:
-            if self.game_over:
-                for button in self.finish_buttons:
-                    button.handle_event(event)
-            elif self.is_paused:
-                for button in self.pause_buttons:
-                    button.handle_event(event)
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                # Allow direct mouse pause click for all games, even when hand cursor is not active.
-                if self.pause_btn_rect.collidepoint(event.pos) and self.can_pause():
-                    self.pause_game()
-        if self._swipe_pause_enabled:
-            if (
-                not self.game_over
-                and not self.is_paused
-                and gesture_data.swipe == "right"
-                and self.can_pause()
-            ):
-                self.pause_game()
-            elif self.is_paused and gesture_data.swipe == "left":
-                self.resume_game()
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                pos = event.pos
+                if self.confirm_action is not None:
+                    # Confirm overlay takes full priority
+                    if self.confirm_yes_rect.collidepoint(pos):
+                        self._execute_confirm()
+                    elif self.confirm_no_rect.collidepoint(pos):
+                        self._cancel_confirm()
+                    continue
+                if self.game_over:
+                    for button in self.finish_buttons:
+                        button.handle_event(event)
+                elif self.is_paused:
+                    for button in self.pause_buttons:
+                        button.handle_event(event)
+                else:
+                    if self.pause_btn_rect.collidepoint(pos) and self.can_pause():
+                        self.pause_game()
+                    elif self.hud_exit_btn_rect.collidepoint(pos):
+                        self.request_confirm("exit")
+                    elif self.hud_reset_btn_rect.collidepoint(pos):
+                        self.request_confirm("reset")
+            elif event.type != pygame.MOUSEBUTTONDOWN:
+                if self.confirm_action is None:
+                    if self.game_over:
+                        for button in self.finish_buttons:
+                            button.handle_event(event)
+                    elif self.is_paused:
+                        for button in self.pause_buttons:
+                            button.handle_event(event)
         # Virtual hand cursor click dispatch
         if self.hand_cursor_pos is not None:
             just_pinched = self.hand_cursor_pinching and not self._hand_prev_pinching
@@ -129,7 +146,7 @@ class RehabGameBase(BaseScreen):
             return
         if self.hint_timer > 0:
             self.hint_timer = max(0.0, self.hint_timer - dt)
-        if self.is_paused:
+        if self.is_paused or self._confirming:
             return
         self.time_remaining = max(0.0, self.time_remaining - dt)
         if self.time_remaining <= 0:
@@ -141,6 +158,13 @@ class RehabGameBase(BaseScreen):
 
     def _on_hand_click(self, pos: tuple[int, int]) -> None:
         """Dispatch a pinch-click from the virtual hand cursor to the appropriate button."""
+        # Confirm overlay takes full priority
+        if self.confirm_action is not None:
+            if self.confirm_yes_rect.collidepoint(pos):
+                self._execute_confirm()
+            elif self.confirm_no_rect.collidepoint(pos):
+                self._cancel_confirm()
+            return
         if self.game_over:
             for btn in self.finish_buttons:
                 if btn.rect.collidepoint(pos):
@@ -152,9 +176,12 @@ class RehabGameBase(BaseScreen):
                     btn.callback()
                     return
         else:
-            # Pause button in the HUD
             if self.pause_btn_rect.collidepoint(pos) and self.can_pause():
                 self.pause_game()
+            elif self.hud_exit_btn_rect.collidepoint(pos):
+                self.request_confirm("exit")
+            elif self.hud_reset_btn_rect.collidepoint(pos):
+                self.request_confirm("reset")
 
     def add_result(self, success: bool, pos: tuple[float, float], finger_hint: str | None = None) -> None:
         self.total_actions += 1
@@ -213,6 +240,76 @@ class RehabGameBase(BaseScreen):
 
     def trigger_hint(self, duration: float) -> None:
         self.hint_timer = duration
+
+    # ── Confirm-dialog helpers ────────────────────────────────────────────────
+
+    def request_confirm(self, action: str) -> None:
+        """Show the 'Are you sure?' overlay for 'exit' or 'reset'. Freezes the timer."""
+        self.confirm_action = action
+        self._confirming = True
+
+    def _cancel_confirm(self) -> None:
+        self.confirm_action = None
+        self._confirming = False
+
+    def _execute_confirm(self) -> None:
+        action = self.confirm_action
+        self.confirm_action = None
+        self._confirming = False
+        if action == "exit":
+            self.exit_to_menu()
+        elif action == "reset":
+            self._replay()
+
+    # ── Hand cursor helpers (shared by all games) ─────────────────────────────
+
+    def _map_cursor_to_screen(self, webcam_pos: tuple[int, int]) -> tuple[int, int]:
+        """Map webcam-space coordinates (640×480) to current screen-space coordinates."""
+        screen_w, screen_h = self.manager.screen.get_size()
+        sx = int(webcam_pos[0] * screen_w / 640)
+        sy = int(webcam_pos[1] * screen_h / 480)
+        return (sx, sy)
+
+    def _draw_hand_cursor(self, surface: pygame.Surface, pos: tuple[int, int], pinching: bool) -> None:
+        """Render a hand-shaped cursor (open = hovering, closed = pinching)."""
+        cx, cy = pos
+        s = 1.0
+        if pinching:
+            palm_rect = pygame.Rect(int(cx - 10 * s), int(cy - 4 * s), int(20 * s), int(18 * s))
+            pygame.draw.ellipse(surface, (255, 220, 185), palm_rect)
+            pygame.draw.ellipse(surface, (200, 160, 130), palm_rect, 2)
+            for i in range(4):
+                fx = int(cx - 9 * s + i * 6 * s)
+                fy = int(cy - 8 * s)
+                frect = pygame.Rect(fx, fy, int(6 * s), int(10 * s))
+                pygame.draw.ellipse(surface, (255, 210, 175), frect)
+                pygame.draw.ellipse(surface, (200, 160, 130), frect, 2)
+            thumb_pts = [
+                (int(cx - 12 * s), int(cy + 2 * s)),
+                (int(cx - 16 * s), int(cy - 2 * s)),
+                (int(cx - 13 * s), int(cy - 6 * s)),
+                (int(cx - 9 * s),  int(cy - 2 * s)),
+            ]
+            pygame.draw.polygon(surface, (255, 210, 175), thumb_pts)
+            pygame.draw.polygon(surface, (200, 160, 130), thumb_pts, 2)
+        else:
+            palm_rect = pygame.Rect(int(cx - 11 * s), int(cy + 2 * s), int(22 * s), int(20 * s))
+            pygame.draw.ellipse(surface, (255, 220, 185), palm_rect)
+            pygame.draw.ellipse(surface, (200, 160, 130), palm_rect, 2)
+            for ox, oy, fw, fh in [(-8, -18, 5, 20), (-2, -20, 5, 22), (4, -18, 5, 20), (10, -14, 5, 16)]:
+                frect = pygame.Rect(int(cx + ox * s), int(cy + oy * s), int(fw * s), int(fh * s))
+                pygame.draw.ellipse(surface, (255, 218, 180), frect)
+                pygame.draw.ellipse(surface, (200, 160, 130), frect, 2)
+            thumb_pts = [
+                (int(cx - 13 * s), int(cy + 6 * s)),
+                (int(cx - 20 * s), int(cy - 4 * s)),
+                (int(cx - 16 * s), int(cy - 8 * s)),
+                (int(cx - 10 * s), int(cy + 0 * s)),
+            ]
+            pygame.draw.polygon(surface, (255, 218, 180), thumb_pts)
+            pygame.draw.polygon(surface, (200, 160, 130), thumb_pts, 2)
+        pygame.draw.circle(surface, CYAN, pos, 4)
+        pygame.draw.circle(surface, WHITE, pos, 4, 1)
 
     def end_game(self) -> None:
         if self.total_actions > 0 and self.correct_actions == self.total_actions:
@@ -294,44 +391,29 @@ class RehabGameBase(BaseScreen):
         bar_rect = pygame.Rect(sw - 350, 28, 280, 20)
         draw_progress_bar(surface, bar_rect, self.time_remaining / max(1, self.settings["duration_minutes"] * 60), CYAN)
         draw_text(surface, f"{int(self.time_remaining)}s", 20, WHITE, (sw - 60, 24))
-        # Pause hint — only shown for games that use swipe-to-pause
-        if self._swipe_pause_enabled:
-            if self.score > 0 or self.total_actions > 0:
-                pause_hint = "Swipe right to pause"
-            else:
-                pause_hint = "Pause unlocks after your first action"
-            pause_hint_x = sw - 350
-            pause_hint_max = max(120, (sw - 14 - 130) - pause_hint_x - 8)
-            draw_text(surface, pause_hint, 16, TEXT_MUTED, (pause_hint_x, 54), max_width=pause_hint_max, truncate=True)
-        # ── Hand-clickable PAUSE button ──────────────────────────────────────
-        btn_w, btn_h = 130, 36
-        self.pause_btn_rect = pygame.Rect(sw - btn_w - 14, 68, btn_w, btn_h)
-        hand_hover = self.hand_cursor_pos is not None and self.pause_btn_rect.collidepoint(self.hand_cursor_pos)
-        mouse_hover = self.pause_btn_rect.collidepoint(pygame.mouse.get_pos())
-        hovered = hand_hover or mouse_hover
-        if self.can_pause():
-            btn_bg   = CYAN if hovered else BG_CARD
-            btn_border = (min(255, CYAN[0] + 50), min(255, CYAN[1] + 50), min(255, CYAN[2] + 50)) if hovered else CYAN
-            btn_label  = "PAUSE"
-            lbl_color  = WHITE
-        else:
-            btn_bg     = (30, 40, 52)
-            btn_border = DARK_GRAY
-            btn_label  = "PAUSE"
-            lbl_color  = TEXT_MUTED
-        pygame.draw.rect(surface, btn_bg, self.pause_btn_rect, border_radius=8)
-        pygame.draw.rect(surface, btn_border, self.pause_btn_rect, width=2, border_radius=8)
-        draw_text(
-            surface,
-            btn_label,
-            15,
-            lbl_color,
-            self.pause_btn_rect.center,
-            center=True,
-            bold=True,
-            max_width=self.pause_btn_rect.width - 14,
-            truncate=True,
-        )
+        # ── HUD control strip: [PAUSE] [EXIT] [RESET] ───────────────────────
+        _bw, _bh, _gap = 88, 32, 6
+        _by = 55
+        self.pause_btn_rect     = pygame.Rect(sw - _bw * 3 - _gap * 2 - 14, _by, _bw, _bh)
+        self.hud_exit_btn_rect  = pygame.Rect(sw - _bw * 2 - _gap     - 14, _by, _bw, _bh)
+        self.hud_reset_btn_rect = pygame.Rect(sw - _bw               - 14, _by, _bw, _bh)
+        _hand  = self.hand_cursor_pos
+        _mouse = pygame.mouse.get_pos()
+        _gameplay = not self.is_paused and not self.game_over and self.confirm_action is None
+
+        def _draw_hud_btn(rect, label, enabled, accent):
+            hov = enabled and ((_hand and rect.collidepoint(_hand)) or rect.collidepoint(_mouse))
+            bg  = accent if hov else BG_CARD
+            bdr = tuple(min(255, c + 50) for c in accent) if hov else accent
+            if not enabled:
+                bg, bdr = (30, 40, 52), DARK_GRAY
+            pygame.draw.rect(surface, bg,  rect, border_radius=8)
+            pygame.draw.rect(surface, bdr, rect, width=2, border_radius=8)
+            draw_text(surface, label, 14, WHITE if enabled else TEXT_MUTED, rect.center, center=True, bold=True)
+
+        _draw_hud_btn(self.pause_btn_rect,     "PAUSE", _gameplay and self.can_pause(), CYAN)
+        _draw_hud_btn(self.hud_exit_btn_rect,  "EXIT",  _gameplay,                     RED)
+        _draw_hud_btn(self.hud_reset_btn_rect, "RESET", _gameplay,                     ORANGE)
         if gesture_data.frame_surface:
             x = surface.get_width() - WEBCAM_PREVIEW_SIZE[0] - 18
             y = surface.get_height() - WEBCAM_PREVIEW_SIZE[1] - 18
@@ -371,8 +453,6 @@ class RehabGameBase(BaseScreen):
             truncate=True,
         )
         draw_text(surface, f"Level {self.level}", 20, TEXT_MUTED, (panel.centerx, panel.y + 158), center=True, max_width=panel.width - 36, truncate=True)
-        if self._swipe_pause_enabled:
-            draw_text(surface, "Swipe left to resume", 17, CYAN, (panel.centerx, panel.y + 178), center=True, max_width=panel.width - 36, truncate=True)
         for button in self.pause_buttons:
             button.draw(surface, hand_pos=self.hand_cursor_pos)
 
@@ -416,3 +496,35 @@ class RehabGameBase(BaseScreen):
             draw_text(surface, ach_text, 17, TEXT_MUTED, (panel.centerx, panel.y + 210), center=True, max_width=panel.width - 40, truncate=True)
         for button in self.finish_buttons:
             button.draw(surface, hand_pos=self.hand_cursor_pos)
+
+    def draw_confirm_overlay(self, surface: pygame.Surface) -> None:
+        """Draw the 'Are you sure?' modal. Updates confirm_yes/no rects for hit-testing."""
+        if self.confirm_action is None:
+            return
+        overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 210))
+        surface.blit(overlay, (0, 0))
+        pw, ph = 440, 210
+        panel = pygame.Rect(surface.get_width() // 2 - pw // 2, surface.get_height() // 2 - ph // 2, pw, ph)
+        pygame.draw.rect(surface, BG_CARD, panel, border_radius=14)
+        pygame.draw.rect(surface, RED,     panel, width=2, border_radius=14)
+        draw_text(surface, "Are you sure?", 30, WHITE, (panel.centerx, panel.y + 42),
+                  center=True, bold=True)
+        question = "Exit to main menu?" if self.confirm_action == "exit" else "Reset the game?"
+        draw_text(surface, question, 21, TEXT_MUTED, (panel.centerx, panel.y + 84), center=True)
+        bw, bh, gap = 160, 46, 18
+        total = bw * 2 + gap
+        lx = panel.centerx - total // 2
+        by = panel.y + 138
+        self.confirm_yes_rect = pygame.Rect(lx,          by, bw, bh)
+        self.confirm_no_rect  = pygame.Rect(lx + bw + gap, by, bw, bh)
+        _hand  = self.hand_cursor_pos
+        _mouse = pygame.mouse.get_pos()
+        for rect, label, accent in [
+            (self.confirm_yes_rect, "YES — confirm", RED),
+            (self.confirm_no_rect,  "NO  — cancel",  CYAN),
+        ]:
+            hov = (_hand and rect.collidepoint(_hand)) or rect.collidepoint(_mouse)
+            pygame.draw.rect(surface, accent if hov else BG_CARD, rect, border_radius=10)
+            pygame.draw.rect(surface, accent,                      rect, width=2, border_radius=10)
+            draw_text(surface, label, 18, WHITE, rect.center, center=True, bold=True)

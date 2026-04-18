@@ -62,6 +62,14 @@ class ThumbTangoGame(RehabGameBase):
         self.preview_timer = state.get("preview_timer", 0.0)
 
     def update(self, dt, gesture_data) -> None:
+        # Track hand cursor position so HUD buttons are pinch-operable
+        hand = gesture_data.controlling_hand
+        if hand:
+            self.hand_cursor_pos     = self._map_cursor_to_screen(hand["pinch"]["position"])
+            self.hand_cursor_pinching = hand["pinch"]["pinching"]
+        else:
+            self.hand_cursor_pos     = None
+            self.hand_cursor_pinching = False
         super().update(dt, gesture_data)
         if self.game_over or self.is_paused:
             return
@@ -109,6 +117,9 @@ class ThumbTangoGame(RehabGameBase):
     def process_gesture(self, gesture_data) -> None:
         if self.gesture_cooldown > 0 or not gesture_data.controlling_hand:
             return
+        # Don't register thumb gestures while a confirm dialog is showing
+        if self._confirming:
+            return
         opposition = gesture_data.controlling_hand["opposition"]
         if not opposition["active"]:
             return
@@ -137,6 +148,10 @@ class ThumbTangoGame(RehabGameBase):
             self.draw_pause_overlay(surface)
         if self.game_over:
             self.draw_finish_modal(surface)
+        # Confirm dialog sits above everything except the hand cursor
+        self.draw_confirm_overlay(surface)
+        if self.hand_cursor_pos:
+            self._draw_hand_cursor(surface, self.hand_cursor_pos, self.hand_cursor_pinching)
 
     def draw_board(self, surface: pygame.Surface) -> None:
         draw_text(surface, "When the ball reaches the split zone, use one thumb-to-finger touch to choose the matching lane.", 22, TEXT_MUTED, (300, 120))
